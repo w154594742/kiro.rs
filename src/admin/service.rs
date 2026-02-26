@@ -178,6 +178,7 @@ impl AdminService {
             remaining,
             usage_percentage,
             next_reset_at: usage.next_date_reset,
+            free_trial_expiry: usage.free_trial_expiry(),
         })
     }
 

@@ -197,4 +197,13 @@ impl UsageLimitsResponse {
 
         total
     }
+
+    /// 获取免费试用过期时间（账户截止日期）
+    ///
+    /// 从第一个使用量明细的免费试用信息中提取过期时间
+    pub fn free_trial_expiry(&self) -> Option<f64> {
+        self.primary_breakdown()
+            .and_then(|breakdown| breakdown.free_trial_info.as_ref())
+            .and_then(|trial| trial.free_trial_expiry)
+    }
 }

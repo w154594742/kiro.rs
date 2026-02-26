@@ -32,7 +32,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [verifying, setVerifying] = useState(false)
   const [verifyProgress, setVerifyProgress] = useState({ current: 0, total: 0 })
   const [verifyResults, setVerifyResults] = useState<Map<number, VerifyResult>>(new Map())
-  const [balanceMap, setBalanceMap] = useState<Map<number, BalanceResponse>>(new Map())
+  // 从 localStorage 恢复余额缓存
+  const [balanceMap, setBalanceMap] = useState<Map<number, BalanceResponse>>(() => {
+    return storage.getBalanceCache()
+  })
   const [loadingBalanceIds, setLoadingBalanceIds] = useState<Set<number>>(new Set())
   const [queryingInfo, setQueryingInfo] = useState(false)
   const [queryInfoProgress, setQueryInfoProgress] = useState({ current: 0, total: 0 })
@@ -71,6 +74,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   // 只保留当前仍存在的凭据缓存，避免删除后残留旧数据
   useEffect(() => {
+    // 等待数据加载完成后再处理缓存
+    if (isLoading) {
+      return
+    }
+
     if (!data?.credentials) {
       setBalanceMap(new Map())
       setLoadingBalanceIds(new Set())
@@ -101,7 +109,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
       })
       return next.size === prev.size ? prev : next
     })
-  }, [data?.credentials])
+  }, [data?.credentials, isLoading])
+
+  // 自动持久化余额缓存到 localStorage
+  useEffect(() => {
+    storage.setBalanceCache(balanceMap)
+  }, [balanceMap])
 
   const toggleDarkMode = () => {
     setDarkMode(!darkMode)

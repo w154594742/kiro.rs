@@ -48,6 +48,41 @@ function formatLastUsed(lastUsedAt: string | null): string {
   return `${days} 天前`
 }
 
+// 格式化账户截止日期，显示日期和剩余天数
+function formatExpiryDate(freeTrialExpiry: number): { text: string; isUrgent: boolean } {
+  // 后端返回的是 Unix 时间戳（秒），需要转换为毫秒
+  const expiryTimestamp = freeTrialExpiry * 1000
+  const expiryDate = new Date(expiryTimestamp)
+  const now = Date.now()
+  const daysRemaining = Math.max(0, Math.ceil((expiryTimestamp - now) / (1000 * 60 * 60 * 24)))
+
+  // 格式化为 YYYY-MM-DD HH:mm:ss
+  const dateStr = expiryDate.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+  const isUrgent = daysRemaining < 7
+
+  return {
+    text: `${dateStr} (剩余 ${daysRemaining} 天)`,
+    isUrgent
+  }
+}
+
+// 加载状态组件（复用）
+function LoadingIndicator() {
+  return (
+    <span className="text-sm ml-1">
+      <Loader2 className="inline w-3 h-3 animate-spin" /> 加载中...
+    </span>
+  )
+}
+
 export function CredentialCard({
   credential,
   onViewBalance,
@@ -126,6 +161,22 @@ export function CredentialCard({
         toast.error('删除失败: ' + (err as Error).message)
       },
     })
+  }
+
+  // 渲染账户截止日期
+  const renderExpiryDate = () => {
+    if (loadingBalance) {
+      return <LoadingIndicator />
+    }
+    if (!balance?.freeTrialExpiry) {
+      return <span className="text-sm text-muted-foreground ml-1">未知</span>
+    }
+    const { text, isUrgent } = formatExpiryDate(balance.freeTrialExpiry)
+    return (
+      <span className={`font-medium ml-1 ${isUrgent ? 'text-red-500' : ''}`}>
+        {text}
+      </span>
+    )
   }
 
   return (
@@ -226,11 +277,13 @@ export function CredentialCard({
               <span className="font-medium">{formatLastUsed(credential.lastUsedAt)}</span>
             </div>
             <div className="col-span-2">
+              <span className="text-muted-foreground">截止日期：</span>
+              {renderExpiryDate()}
+            </div>
+            <div className="col-span-2">
               <span className="text-muted-foreground">剩余用量：</span>
               {loadingBalance ? (
-                <span className="text-sm ml-1">
-                  <Loader2 className="inline w-3 h-3 animate-spin" /> 加载中...
-                </span>
+                <LoadingIndicator />
               ) : balance ? (
                 <span className="font-medium ml-1">
                   {balance.remaining.toFixed(2)} / {balance.usageLimit.toFixed(2)}
