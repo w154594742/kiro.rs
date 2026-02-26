@@ -491,7 +491,7 @@ pub struct MultiTokenManager {
     /// 凭据文件路径（用于回写）
     credentials_path: Option<PathBuf>,
     /// 是否为多凭据格式（数组格式才回写）
-    is_multiple_format: bool,
+    is_multiple_format: AtomicBool,
     /// 负载均衡模式（运行时可修改）
     load_balancing_mode: Mutex<String>,
     /// 最近一次统计持久化时间（用于 debounce）
@@ -604,7 +604,7 @@ impl MultiTokenManager {
             current_id: Mutex::new(initial_id),
             refresh_lock: TokioMutex::new(()),
             credentials_path,
-            is_multiple_format,
+            is_multiple_format: AtomicBool::new(is_multiple_format),
             load_balancing_mode: Mutex::new(load_balancing_mode),
             last_stats_save_at: Mutex::new(None),
             stats_dirty: AtomicBool::new(false),
@@ -938,7 +938,7 @@ impl MultiTokenManager {
         use anyhow::Context;
 
         // 仅多凭据格式才回写
-        if !self.is_multiple_format {
+        if !self.is_multiple_format.load(Ordering::SeqCst) {
             return Ok(false);
         }
 
@@ -1441,6 +1441,79 @@ impl MultiTokenManager {
         Ok(usage_limits)
     }
 
+    /// 转换为多凭据格式（Admin API 添加凭据时自动调用）
+    ///
+    /// # 功能
+    /// 当配置文件为单凭据格式（对象）时，首次通过 Admin UI 添加凭据会触发此方法：
+    /// 1. 将当前内存中的所有凭据序列化为数组格式
+    /// 2. 备份原配置文件（添加 .bak 后缀）
+    /// 3. 将数组格式写回配置文件
+    /// 4. 更新 is_multiple_format 标志为 true
+    ///
+    /// # 返回
+    /// - `Ok(true)` - 转换成功
+    /// - `Ok(false)` - 已经是多凭据格式，无需转换
+    /// - `Err(_)` - 转换失败
+    fn convert_to_multiple_format(&self) -> anyhow::Result<bool> {
+        use anyhow::Context;
+
+        // 检查当前格式
+        if self.is_multiple_format.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+
+        let path = match &self.credentials_path {
+            Some(p) => p,
+            None => anyhow::bail!("未配置凭据文件路径，无法转换格式"),
+        };
+
+        // 收集所有凭据（包括原有的单凭据）
+        let credentials: Vec<KiroCredentials> = {
+            let entries = self.entries.lock();
+            entries
+                .iter()
+                .map(|e| {
+                    let mut cred = e.credentials.clone();
+                    cred.canonicalize_auth_method();
+                    cred.disabled = e.disabled;
+                    cred
+                })
+                .collect()
+        };
+
+        // 备份原配置文件
+        let backup_path = path.with_extension("json.bak");
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| std::fs::copy(path, &backup_path))
+                .with_context(|| format!("备份配置文件失败: {:?} -> {:?}", path, backup_path))?;
+        } else {
+            std::fs::copy(path, &backup_path)
+                .with_context(|| format!("备份配置文件失败: {:?} -> {:?}", path, backup_path))?;
+        }
+        tracing::info!("已备份原配置文件到: {:?}", backup_path);
+
+        // 序列化为 pretty JSON（数组格式）
+        let json = serde_json::to_string_pretty(&credentials).context("序列化凭据失败")?;
+
+        // 写入文件
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| std::fs::write(path, &json))
+                .with_context(|| format!("写入配置文件失败: {:?}", path))?;
+        } else {
+            std::fs::write(path, &json)
+                .with_context(|| format!("写入配置文件失败: {:?}", path))?;
+        }
+
+        // 更新格式标志
+        self.is_multiple_format.store(true, Ordering::SeqCst);
+
+        tracing::info!(
+            "已将配置文件转换为多凭据格式（数组格式），共 {} 个凭据",
+            credentials.len()
+        );
+        Ok(true)
+    }
+
     /// 添加新凭据（Admin API）
     ///
     /// # 流程
@@ -1525,7 +1598,12 @@ impl MultiTokenManager {
             });
         }
 
-        // 6. 持久化
+        // 6. 持久化前检查格式，如为单凭据格式则自动转换
+        if !self.is_multiple_format.load(Ordering::SeqCst) {
+            self.convert_to_multiple_format()?;
+        }
+
+        // 7. 持久化新添加的凭据
         self.persist_credentials()?;
 
         tracing::info!("成功添加凭据 #{}", new_id);
