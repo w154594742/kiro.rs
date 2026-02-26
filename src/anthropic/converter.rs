@@ -186,7 +186,15 @@ fn create_placeholder_tool(name: &str) -> Tool {
 }
 
 /// 将 Anthropic 请求转换为 Kiro 请求
-pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, ConversionError> {
+///
+/// # Arguments
+/// * `req` - Anthropic 格式的请求
+/// * `system_prompt_override` - 可选的自定义 system prompt，用于覆盖 AI 身份
+///
+/// # Returns
+/// * `Ok(ConversionResult)` - 转换成功
+/// * `Err(ConversionError)` - 转换失败
+pub fn convert_request(req: &MessagesRequest, system_prompt_override: Option<&str>) -> Result<ConversionResult, ConversionError> {
     // 1. 映射模型
     let model_id = map_model(&req.model)
         .ok_or_else(|| ConversionError::UnsupportedModel(req.model.clone()))?;
@@ -231,7 +239,7 @@ pub fn convert_request(req: &MessagesRequest) -> Result<ConversionResult, Conver
     let mut tools = convert_tools(&req.tools);
 
     // 7. 构建历史消息（需要先构建，以便收集历史中使用的工具）
-    let mut history = build_history(req, messages, &model_id)?;
+    let mut history = build_history(req, messages, &model_id, system_prompt_override)?;
 
     // 8. 验证并过滤 tool_use/tool_result 配对
     // 移除孤立的 tool_result（没有对应的 tool_use）
@@ -579,17 +587,36 @@ fn has_thinking_tags(content: &str) -> bool {
 ///   注意：该切片与 `req.messages` 可能不同（prefill 时会截断末尾的 assistant 消息），
 ///   调用方应始终使用此参数而非 `req.messages`。
 /// * `model_id` - 已映射的 Kiro 模型 ID
-fn build_history(req: &MessagesRequest, messages: &[super::types::Message], model_id: &str) -> Result<Vec<Message>, ConversionError> {
+/// * `system_prompt_override` - 可选的自定义 system prompt，用于覆盖 AI 身份
+fn build_history(req: &MessagesRequest, messages: &[super::types::Message], model_id: &str, system_prompt_override: Option<&str>) -> Result<Vec<Message>, ConversionError> {
     let mut history = Vec::new();
 
     // 生成thinking前缀（如果需要）
     let thinking_prefix = generate_thinking_prefix(req);
 
     // 1. 处理系统消息
-    if let Some(ref system) = req.system {
+    // 如果配置了自定义 system prompt，将其前置追加到请求的 system 之前
+    let system_to_use = match system_prompt_override {
+        Some(override_prompt) if !override_prompt.is_empty() => {
+            // 创建自定义 system prompt 消息
+            let mut messages = vec![super::types::SystemMessage {
+                text: override_prompt.to_string()
+            }];
+
+            // 如果请求中也有 system，追加到后面
+            if let Some(req_system) = &req.system {
+                messages.extend(req_system.clone());
+            }
+
+            Some(messages)
+        }
+        _ => req.system.clone()
+    };
+
+    if let Some(ref system) = system_to_use {
         let system_content: String = system
             .iter()
-            .map(|s| s.text.clone())
+            .map(|s: &super::types::SystemMessage| s.text.clone())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -983,7 +1010,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
 
         // 验证 tools 列表中包含了历史中使用的工具的占位符定义
         let tools = &result
@@ -1052,7 +1079,7 @@ mod tests {
             }),
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
         assert_eq!(
             result.conversation_state.conversation_id,
             "a0662283-7fd3-4399-a7eb-52b9a717ae88"
@@ -1080,7 +1107,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req).unwrap();
+        let result = convert_request(&req, None).unwrap();
         // 验证生成的是有效的 UUID 格式
         assert_eq!(result.conversation_state.conversation_id.len(), 36);
         assert_eq!(
@@ -1510,7 +1537,7 @@ mod tests {
             metadata: None,
         };
 
-        let result = convert_request(&req);
+        let result = convert_request(&req, None);
         assert!(result.is_ok(), "连续 assistant 消息场景不应报错: {:?}", result.err());
 
         let state = result.unwrap().conversation_state;

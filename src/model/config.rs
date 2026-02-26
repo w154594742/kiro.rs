@@ -90,6 +90,11 @@ pub struct Config {
     #[serde(default = "default_load_balancing_mode")]
     pub load_balancing_mode: String,
 
+    /// 自定义 System Prompt（可选，用于覆盖 AI 身份）
+    /// 配置后会在每次请求时注入到系统提示词中，覆盖默认的 AI 自我介绍
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
@@ -154,6 +159,7 @@ impl Default for Config {
             proxy_password: None,
             admin_api_key: None,
             load_balancing_mode: default_load_balancing_mode(),
+            system_prompt: None,
             config_path: None,
         }
     }
