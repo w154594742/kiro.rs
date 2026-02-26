@@ -1,6 +1,6 @@
 services:
   kiro-rs:
-    image: ghcr.io/w154594742/kiro-rs:v2026.2.6-dev.2
+    image: ghcr.io/w154594742/kiro-rs:beta
     container_name: kiro-rs
     extra_hosts:
       - "host.docker.internal:host-gateway"
