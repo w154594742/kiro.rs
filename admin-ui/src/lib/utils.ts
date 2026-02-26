@@ -105,56 +105,8 @@ function parseNestedErrorMessage(message: string): { title: string; detail?: str
   return { title: message }
 }
 
-/**
- * 可导入的 JSON 凭据数据格式
- */
-interface ImportableCredentialData {
-  success?: boolean
-  ssoToken?: string
-  accessToken?: string
-  refreshToken?: string
-  clientId?: string
-  clientSecret?: string
-  name?: string
-  password?: string
-  email?: string
-  generatedEmail?: string
-}
 
-/**
- * 解析凭据JSON字符串
- * @param jsonString - JSON格式的凭据数据字符串
- * @returns 解析成功返回凭据数据对象，失败返回null
- */
-export function parseCredentialJson(jsonString: string): ImportableCredentialData | null {
-  const trimmed = jsonString.trim()
 
-  // 判断是否为JSON格式（以 { 开头）
-  if (!trimmed.startsWith('{')) {
-    return null
-  }
-
-  try {
-    const data = JSON.parse(trimmed)
-
-    // 验证是否包含至少一个有效字段
-    const hasValidField =
-      typeof data.refreshToken === 'string' ||
-      typeof data.ssoToken === 'string' ||
-      typeof data.accessToken === 'string' ||
-      typeof data.clientId === 'string' ||
-      typeof data.clientSecret === 'string'
-
-    if (!hasValidField) {
-      return null
-    }
-
-    return data as ImportableCredentialData
-  } catch {
-    // JSON解析失败
-    return null
-  }
-}
 
 /**
  * 计算字符串的 SHA-256 哈希（十六进制）
